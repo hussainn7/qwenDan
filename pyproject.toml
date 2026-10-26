@@ -1,0 +1,26 @@
+[project]
+name = "qwen-voice"
+version = "0.1.0"
+description = "Local Qwen3-TTS voice cloning for agents: MCP server, CLI and OpenAI-compatible speech API"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+authors = [{ name = "Hussain" }]
+requires-python = ">=3.10"
+dependencies = [
+    "qwen-tts==0.1.1",
+    "torch>=2.5",
+    "numpy",
+    "soundfile",
+    "fastapi",
+    "uvicorn",
+    "httpx",
+    "mcp>=1.10",
+]
+
+[project.scripts]
+qwen-voice = "qwen_voice.cli:main"
+qwen-voice-mcp = "qwen_voice.mcp_server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
