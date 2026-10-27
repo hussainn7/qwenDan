@@ -131,6 +131,51 @@ class Engine:
         }
         return np.concatenate(joined), sr, settings
 
+    def synthesize_batch(self, texts, voice, emotions=None, intensity=None, seed=None, language=None):
+        """Several short texts in one generation pass (about 2x the throughput of one-by-one on CPU).
+        All texts share the sampling settings and seed, so a take depends on the batch it was made in.
+        Returns (list of waveforms float32, sample_rate, settings dict)."""
+        texts = [" ".join(t.split()) for t in texts]
+        if not texts or any(not t for t in texts):
+            raise ValueError("texts must be non-empty")
+        if any(len(t) > MAX_CHUNK_CHARS for t in texts):
+            raise ValueError(f"batch texts must be <= {MAX_CHUNK_CHARS} characters each")
+        emotions = list(emotions) if emotions else list(voice.emotions)
+        intensity = voice.intensity if intensity is None else float(intensity)
+        seed = voice.seed if seed is None else int(seed)
+        language = language or voice.language
+        temperature, top_p, repetition_penalty = emo.mix(emotions, intensity)
+
+        with self.lock:
+            model = self.load()
+            prompt = self._prompt(voice)
+            torch.manual_seed(seed)
+            np.random.seed(seed % (2**32))
+            wavs, sr = model.generate_voice_clone(
+                text=texts,
+                language=language,
+                voice_clone_prompt=prompt,
+                max_new_tokens=2048,
+                do_sample=True,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=emo.BASE_TOP_K,
+                repetition_penalty=repetition_penalty,
+            )
+        settings = {
+            "voice": voice.name,
+            "mode": voice.mode,
+            "emotions": emotions,
+            "intensity": intensity,
+            "seed": seed,
+            "language": language,
+            "batch": len(texts),
+            "temperature": round(temperature, 3),
+            "top_p": round(top_p, 3),
+            "repetition_penalty": round(repetition_penalty, 3),
+        }
+        return [np.asarray(w, dtype=np.float32).squeeze() for w in wavs], sr, settings
+
     def unload(self):
         with self.lock:
             self.model = None

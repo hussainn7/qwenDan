@@ -4,6 +4,7 @@ Clients (CLI, MCP server) start it on demand and it exits after QWEN_VOICE_IDLE_
 (default 15) without requests, so the ~10 GB the model uses comes back on its own.
 
     POST /speak             native: writes a file, returns its path + settings
+    POST /speak_batch       several short texts in one pass (shared settings + seed), one file each
     POST /v1/audio/speech   OpenAI-compatible: returns audio bytes
     GET  /voices, /emotions, /health      POST /shutdown
 """
@@ -48,6 +49,17 @@ class SpeakRequest(BaseModel):
     output_path: str | None = None
     format: str = "wav"
     play: bool = False
+
+
+class SpeakBatchRequest(BaseModel):
+    texts: list[str]
+    output_paths: list[str] | None = None
+    voice: str | None = None
+    emotions: list[str] | None = None
+    intensity: float | None = None
+    seed: int | None = None
+    language: str | None = None
+    format: str = "wav"
 
 
 class OpenAISpeechRequest(BaseModel):
@@ -150,6 +162,35 @@ def speak(req: SpeakRequest):
         "sample_rate": sr,
         **settings,
     }
+
+
+@app.post("/speak_batch")
+def speak_batch(req: SpeakBatchRequest):
+    fmt = req.format.lower().lstrip(".")
+    if fmt not in ("wav", "mp3"):
+        raise HTTPException(400, "format must be wav or mp3")
+    if req.output_paths is not None and len(req.output_paths) != len(req.texts):
+        raise HTTPException(400, "output_paths must match texts")
+    voice = resolve_voice(req.voice)
+    started = time.perf_counter()
+    touch()
+    try:
+        wavs, sr, settings = engine.synthesize_batch(req.texts, voice, emotions=req.emotions,
+                                                     intensity=req.intensity, seed=req.seed, language=req.language)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    finally:
+        touch()
+    items = []
+    for i, (text, wav) in enumerate(zip(req.texts, wavs)):
+        if req.output_paths:
+            out = req.output_paths[i]
+        else:  # numbered, so texts with the same opening words don't overwrite each other
+            out = default_output(text, fmt)
+            out = out.with_stem(f"{out.stem}-{i + 1}")
+        path = write_audio(wav, sr, out)
+        items.append({"path": str(path), "duration_s": round(len(wav) / sr, 2)})
+    return {"items": items, "generation_s": round(time.perf_counter() - started, 2), "sample_rate": sr, **settings}
 
 
 @app.post("/v1/audio/speech")

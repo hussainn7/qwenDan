@@ -56,6 +56,12 @@ def speak(text, **options):
     return _call("POST", "/speak", json=payload)
 
 
+def speak_batch(texts, **options):
+    """Several short texts in one generation pass; raises RuntimeError on daemons without /speak_batch."""
+    payload = {"texts": list(texts), **{k: v for k, v in options.items() if v is not None}}
+    return _call("POST", "/speak_batch", json=payload)
+
+
 def stop():
     if not health():
         return False
