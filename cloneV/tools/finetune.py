@@ -165,6 +165,10 @@ def train(a):
     va = [r for r in rows if r["take"] in val_takes]
     print(f"train {len(tr)} utt ({sum(r['dur'] for r in tr) / 60:.1f} min), val {len(va)} utt from {len(val_takes)} takes")
     xvec = data["xvec"].to(DEV)
+    # per-utterance x-vectors keep "x-vector -> this voice in this room" learnable; the mean makes it a constant
+    order = [json.loads(l)["audio"] for l in open(os.path.join(VO, "data", "utt.jsonl"))]
+    xv_of = {aud: data["xvecs"][i].to(DEV) for i, aud in enumerate(order)} if a.per_utt_xvec else {}
+    spk = lambda r: xv_of.get(r["audio"], xvec)
 
     for p in tts.model.parameters(): p.requires_grad_(False)
     talker = tts.model.talker
@@ -184,7 +188,7 @@ def train(a):
         talker.eval(); l0 = ls = 0
         with torch.no_grad():
             for r in va:
-                a0, s0 = step_loss(B, r["text"], data["codes"][r["audio"]].long().to(DEV), xvec)
+                a0, s0 = step_loss(B, r["text"], data["codes"][r["audio"]].long().to(DEV), spk(r))
                 l0 += a0.item(); ls += s0.item()
         talker.train(); torch.mps.empty_cache()
         return l0 / len(va), ls / len(va)
@@ -195,7 +199,7 @@ def train(a):
         random.shuffle(tr)
         talker.train(); run0 = runs = 0
         for i, r in enumerate(tr):
-            l0, ls = step_loss(B, r["text"], data["codes"][r["audio"]].long().to(DEV), xvec)
+            l0, ls = step_loss(B, r["text"], data["codes"][r["audio"]].long().to(DEV), spk(r))
             ((l0 + 0.3 * ls) / a.accum).backward()
             run0 += l0.item(); runs += ls.item()
             if (i + 1) % a.accum == 0 or i == len(tr) - 1:
@@ -229,12 +233,18 @@ def gen(a):
                                              ref_text=refs[a.icl]["text"], x_vector_only_mode=False)[0]
         if not a.ref_xvec: item.ref_spk_embedding = data["xvec"].to(DEV)
     else:
-        item = VoiceClonePromptItem(ref_code=None, ref_spk_embedding=data["xvec"].to(DEV), x_vector_only_mode=True, icl_mode=False)
+        xv = data["xvec"].to(DEV)
+        if a.xvec_ref:   # x-vector of a refs.json clip instead of the training mean
+            refs = json.load(open(os.path.join(VO, "refs", "refs.json")))
+            xv = tts.create_voice_clone_prompt(ref_audio=os.path.join(VO, "refs", refs[a.xvec_ref]["audio"]),
+                                               x_vector_only_mode=True)[0].ref_spk_embedding.to(DEV)
+        item = VoiceClonePromptItem(ref_code=None, ref_spk_embedding=xv, x_vector_only_mode=True, icl_mode=False)
     name = a.name or f"ft_{a.run}_e{a.epoch}" + (f"_icl{a.icl}" if a.icl else "")
     out_dir = os.path.join(VO, "sweep", "takes", name); os.makedirs(out_dir, exist_ok=True)
-    sids = a.sentences or sorted(clips["clips"])
+    lines = json.load(open(a.texts)) if a.texts else {k: v["text"] for k, v in clips["clips"].items()}
+    sids = a.sentences or sorted(lines)
     for sid in sids:
-        text = clips["clips"][sid]["text"]
+        text = lines[sid]
         for seed in a.seeds:
             out = os.path.join(out_dir, f"{sid}-s{seed}.wav")
             if os.path.exists(out): continue
@@ -262,12 +272,15 @@ if __name__ == "__main__":
     t.add_argument("--epochs", type=int, default=4); t.add_argument("--lr", type=float, default=1e-4)
     t.add_argument("--rank", type=int, default=16); t.add_argument("--alpha", type=float, default=32)
     t.add_argument("--accum", type=int, default=8)
+    t.add_argument("--per-utt-xvec", action="store_true", help="condition each utterance on its own x-vector")
     g = sub.add_parser("gen"); g.add_argument("run"); g.add_argument("epoch", type=int)
     g.add_argument("--seeds", type=int, nargs="+", default=[1, 2]); g.add_argument("--sentences", nargs="*")
     g.add_argument("--icl", help="ICL ref name from refs.json (default: x-vector only)")
     g.add_argument("--ref-xvec", action="store_true", help="with --icl: keep the ref's own x-vector")
     g.add_argument("--streaming", action="store_true"); g.add_argument("--sub-temp", type=float, default=0.9)
     g.add_argument("--temperature", type=float, default=0.9); g.add_argument("--scale", type=float)
+    g.add_argument("--texts", help="JSON {id: text} of new lines instead of the Siri sentences")
+    g.add_argument("--xvec-ref", help="x-vector-only with this refs.json clip's x-vector")
     g.add_argument("--name")
     a = ap.parse_args()
     {"prep": lambda: prep(), "train": lambda: train(a), "gen": lambda: gen(a)}[a.cmd]()

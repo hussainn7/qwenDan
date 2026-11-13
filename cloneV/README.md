@@ -18,8 +18,9 @@ This is a snapshot of the work, taken 2026-11-12 and stopped mid-way.
 | "It sounds robotic / generic": measured | done (below) |
 | My voice in older takes: found, checked and cut | done: 200 sentences, 24.3 min, from 45 takes |
 | LoRA fine-tune on those 24 min | trained (6 passes); pass 2 is the best checkpoint by held-out loss |
-| Listening and measuring the fine-tuned voice | **not done yet**: the next step |
-| Wiring the fine-tuned voice into `clone.py` / qwen-voice | not started |
+| Measuring the fine-tuned voice | done (section 5): no version beats the ICL clone on likeness yet |
+| Listening A/B (real / ICL / fine-tune) | reels made, waiting on my ear |
+| Wiring the fine-tuned voice into `clone.py` / qwen-voice | only if it wins the listen |
 
 ## 1. The current clone (ICL)
 
@@ -141,38 +142,77 @@ same way `generate()` does, and scores the sub-talker logits directly.
 
 It learns my voice for 2–3 passes, then starts memorising those 24 min. **Passes 2 and 3 are the candidates.**
 
-## 5. Next steps
+## 5. Test results (2026-11-12)
 
-1. **Measure the fine-tune.** Run `tools/eval_ft.sh r16 2` and `tools/eval_ft.sh r16 3`. Each generates the 14
-   held-out Siri sentences × 2 seeds, then scores them with:
-   - Whisper (WER),
-   - `score.py` (closeness),
-   - `prosody.py` (delivery),
-   - `natural.py` (naturalness).
+All rows are single takes (seeds 1–2, no best-of-N), on the 14 held-out Siri sentences unless noted.
+- **likeness:** score.py's closeness against the Siri recording.
+- **fair likeness:** `tools/likeness_x.py`, against the 3 held-out takes from other rooms that no version heard.
+- **pitch shape / word timing:** `prosody.py` correlations with my real reading of the same sentence.
 
-   Compare with the ICL rows above. Also try:
-   - `--sub-temp 0.5`;
-   - `--icl B3` (the LoRA plus the ICL reference);
-   - `--scale 0.5`, a half-strength LoRA, in case the full one is too strong.
-2. **Listen.** Make an A/B reel (real / current ICL / fine-tuned) of the same sentences, plus a few new lines.
-   Measured delivery is a proxy; the call is mine.
-3. **If it wins, wire it in:**
-   - add `--ft ft/r16/epoch-N.safetensors` to `clone.py`, merging the LoRA into the weights at load;
-   - add a qwen-voice voice type that loads the base model plus the LoRA (and the mean x-vector), so the film
-     sessions pick it up by voice name.
-4. **If it overfits or flattens:**
-   - train with more held-out takes and a lower lr (5e-5);
-   - lower the rank (8);
-   - train only 2 passes;
-   - add ICL-format sequences (a reference utterance's codes in the prefix), so it learns to copy a chosen
-     reference's mood (hook energy vs calm explainer).
+| version | likeness | fair likeness | ECAPA | WER | pitch range (me 10.1) | pitch shape r | word timing r |
+|---|---|---|---|---|---|---|---|
+| **ICL now** (B3 clip, sub 0.5) | **98.5** | **97.8** | 0.706 | **0.3 %** | 11.1 | 0.604 | **0.747** |
+| fine-tune 1 (mean x-vector), pass 2 | 82.5 | 90.3 | 0.659 | 1.7 % | 9.0 | 0.622 | 0.730 |
+| fine-tune 1, pass 3 | 85.2 | 94.7 | 0.663 | 3.3 % | 9.3 | 0.587 | 0.703 |
+| fine-tune 1, pass 2, Siri-clip x-vector | 93.4 | 88.9 | 0.695 | 4.9 % | 10.3 | 0.633 | 0.744 |
+| fine-tune 2 (per-utterance x-vectors), pass 2, Siri x-vector | 94.7 | 87.6 | 0.707 | 2.4 % | 11.1 | 0.586 | 0.685 |
+| **fine-tune 2, pass 3, Siri x-vector** | 95.6 | 89.9 | 0.703 | 4.0 % | 11.0 | **0.664** | 0.659 |
+
+The ICL-plus-LoRA variants were scored on Siri sentences S01–S07 only, against ICL now (98.2 likeness, 0 % WER):
+
+| ICL + LoRA variant (S01–S07) | likeness | WER |
+|---|---|---|
+| fine-tune 1, pass 2, streaming | 93.4 | 8.5 % |
+| fine-tune 1, pass 2, non-streaming | 94.8 | 4.0 % |
+| fine-tune 1, pass 2, half strength | 95.2 | 2.0 % |
+| fine-tune 2, pass 3 | 90.9 | 4.6 % |
+
+**Findings:**
+- **Likeness: no fine-tune beats the ICL clone yet.** That holds for both the Siri-room measure and the fair,
+  other-room measure. A 10.6 s ICL reference of one recording still pins the voice better than a LoRA on 24 min of
+  mixed rooms.
+- **A fixed mean x-vector averages me across rooms.** Fine-tune 1 trained on one constant speaker vector, so it
+  learned "average me": lower pitch (−2 st), slower, flatter (9.0 st range), and furthest from any one recording.
+- **Per-utterance x-vectors help the fine-tune but don't win.** Fine-tune 2 lowers held-out loss at every pass
+  (0.992 vs 1.032) and, given the Siri clip's x-vector, matches the ICL's ECAPA score (0.703 vs 0.706).
+- **It follows my pitch shape best of all** (r 0.664 vs 0.604), which is the "says it like me" part.
+- **But it costs word timing and accuracy.** Timing r is 0.659 vs 0.747, and WER 2–5 % vs 0.3 %. One new line got
+  a misplaced pause; another got "how it worked" for "how I work".
+- **Possible cause of the slips:** Whisper transcripts in the training set drop fillers and restarts, so some
+  training text doesn't match its audio exactly.
+- Naturalness (SQUIM MOS 4.4–4.5) is the same for every version.
+
+Listening reels (local, not pushed: they are my voice):
+- `samples/ft/reel-siri-sentences.wav`: real → ICL → fine-tune 2 pass 3, for 6 sentences;
+- `samples/ft/reel-new-lines.wav`: ICL → fine-tune, for the 5 lines in `new_lines.json`.
+
+## 6. Next steps
+
+1. **Listen and decide.** The numbers are a trade-off: the fine-tune is closer in pitch shape, the ICL is better
+   on likeness, timing and accuracy.
+   - If the fine-tune sounds more like me, wire it in: add `--ft` to `clone.py` (merging the LoRA at load,
+     x-vector from a chosen ref) and add a qwen-voice voice type for it.
+   - Otherwise keep the ICL.
+2. **Cleaner training text.** Re-transcribe the training set with a verbatim setting (keep "um", repeats), or drop
+   utterances whose phoneme recognition (`elevator/vo/qwen/phones.py`) disagrees with the text. That should
+   remove the slips and timing drift.
+3. **Train in ICL format.** Put a reference utterance from the same take (codes + text) in the prefix, as
+   `generate_icl_prompt` does. The fine-tune then learns to copy the reference's room and mood exactly, the way
+   the ICL clone does, while adding my general delivery habits. This is the most promising route to beat ICL on
+   both likeness and delivery.
+4. **One room.** Fine-tune only on takes that match the Siri recording's room and mic (median ECAPA ≥ 0.7 to it: 9 takes,
+   about 7 min of speech), or record 5–10 min in that setup.
 5. **More data.** Each new talking-head take is about 40 s more of my voice. Re-run:
    - `extract_src.sh` → `harvest_spk.py` → `transcribe.py` → `segment.py` → `finetune.py prep` → `train`.
 
-   Recording 5–10 min of calm reading, plus some low, quiet line endings, would fill the delivery gaps found
-   above.
-6. **Film side:** read paragraphs, not single lines, and don't speed the voice up with atempo. Both make it sound
-   mechanical, whatever the model.
+   Calm reading and low, quiet line endings are what's missing.
+6. **Film side:** read paragraphs, not single lines, and don't speed the voice up with atempo.
+
+**How to run:**
+- `tools/finetune.py train RUN --epochs 3 --per-utt-xvec`
+- `tools/eval_ft.sh RUN EPOCH --xvec-ref B3` (or `--icl B3 --streaming --sub-temp 0.5 --sentences …`)
+- `tools/compare.py` and `tools/likeness_x.py` for the tables
+- `tools/reel.py` for A/B reels; new lines via `finetune.py gen … --texts new_lines.json`
 
 ## Files
 
@@ -182,6 +222,7 @@ It learns my voice for 2–3 passes, then starts memorising those 24 min. **Pass
   - `train`: trains and saves per-pass checkpoints.
   - `gen`: generates the held-out test sentences from a checkpoint.
 - `tools/eval_ft.sh`: generate, then transcribe, then score.
+- `tools/compare.py`, `tools/likeness_x.py`: the result tables; `tools/reel.py`: A/B listening reels.
 - Data harvest: `tools/extract_src.sh`, `tools/harvest_spk.py`, `tools/segment.py`.
 - Measures:
   - `tools/score.py`: closeness, WER, pitch, MCD;
