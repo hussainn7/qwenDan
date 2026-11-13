@@ -1,0 +1,17 @@
+{
+ "about": "Chosen by the sweep (NOTES.md). Qwen3-TTS 1.7B Base, ICL clone (x_vector_only_mode false) from one ~10-14 s reference of 3 consecutive sentences, model sampling defaults except the sub-talker (residual codebooks) temperature 0.5, best of 4 seeds by tools/pick.py.",
+ "ref": "B3",
+ "mode": "icl",
+ "spk": null,
+ "temperature": 0.9,
+ "top_p": 1.0,
+ "top_k": 50,
+ "repetition_penalty": 1.05,
+ "subtalker_temperature": 0.5,
+ "subtalker_top_p": 1.0,
+ "subtalker_top_k": 50,
+ "non_streaming": false,
+ "seed": 1,
+ "takes": 4,
+ "loudness_db": -22.2
+}
