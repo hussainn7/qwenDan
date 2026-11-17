@@ -8,9 +8,14 @@ reference clip, mode and sampling that scored closest in the sweep (vo/NOTES.md;
 
 By default it reads the line with 4 seeds and keeps the take measured closest to the real take (speaker models +
 Whisper word errors, tools/pick.py); all of them stay in line.takes/ with their scores in line.json.
-  options: --ref NAME (any clip in vo/refs/refs.json), --temperature, --top-p, --top-k, --sub-temperature,
+  options: --mood hype|hook|story|explain|serious (clone from one of his real sentences said that way,
+           vo/refs/moods.json; for a whole script with a mood per line use vo/voiceover.py),
+           --ref NAME (any clip in vo/refs/refs.json), --temperature, --top-p, --top-k, --sub-temperature,
            --eq (tilt the codec's sound toward the phone mic: less boom, more air; neutral on the speaker scores,
-           for cutting clone lines between real ones), --raw-out (no trim, no loudness match)
+           for cutting clone lines between real ones), --raw-out (no trim, no loudness match),
+           --finish PRESET [--tone] (after picking: put the line in one of his real rooms with vo/finish.py, e.g.
+           office-lav = his office on the clip-on lav, with its echo, mic tone and level; 48 kHz out, the unfinished
+           line kept as line.dry.wav)
 
 Write the words the way you'd say them: numbers as words ("twenty eleven"), acronyms in caps are fine (LLM, AI),
 but never put a normal word in caps for stress (OCEAN gets misread and Whisper hides it); use punctuation instead.
@@ -61,6 +66,7 @@ def main():
     ap.add_argument("--seed", type=int, default=S["seed"])
     ap.add_argument("--takes", type=int, default=S["takes"])
     ap.add_argument("--ref", default=S["ref"])
+    ap.add_argument("--mood", help="hype, hook, story, explain or serious (refs/moods.json); overrides --ref")
     ap.add_argument("--temperature", type=float, default=S["temperature"])
     ap.add_argument("--top-p", type=float, default=S["top_p"])
     ap.add_argument("--top-k", type=int, default=S["top_k"])
@@ -70,6 +76,8 @@ def main():
     ap.add_argument("--raw-out", action="store_true")
     ap.add_argument("--allow-caps", action="store_true")
     ap.add_argument("--force", action="store_true", help="overwrite -o")
+    ap.add_argument("--finish", metavar="PRESET", help="room/mic preset in vo/finish/ to apply to the kept line")
+    ap.add_argument("--tone", action="store_true", help="with --finish: the preset's room tone under the line")
     a = ap.parse_args()
     text = " ".join(a.text.split())
     if not a.allow_caps: caps_check(text)
@@ -79,6 +87,10 @@ def main():
     import torch
     from qwen_tts import Qwen3TTSModel
     refs = json.load(open(os.path.join(VO, "refs", "refs.json")))
+    if a.mood:
+        moods = {r["mood"]: r for r in json.load(open(os.path.join(VO, "refs", "moods.json"))).values() if r.get("use")}
+        if a.mood not in moods: raise SystemExit(f"--mood: one of {', '.join(sorted(moods))}")
+        a.ref = f"mood:{a.mood}"; refs[a.ref] = moods[a.mood]
     t0 = time.perf_counter()
     model = Qwen3TTSModel.from_pretrained(MODEL_ID, device_map="mps:0", dtype=torch.float32)
     item = model.create_voice_clone_prompt(ref_audio=os.path.join(VO, "refs", refs[a.ref]["audio"]),
@@ -131,6 +143,16 @@ def main():
         sf.write(out, sf.read(best, dtype="float32")[0], sr, subtype="PCM_24")
         meta.update(seed=int(os.path.basename(best)[1:-4]), takes=ranked)
         print(f"kept {os.path.basename(best)}")
+    if a.finish:
+        sys.path.insert(0, VO)
+        import finish
+        dry = out[:-4] + ".dry.wav"
+        os.replace(out, dry)
+        y, sr = sf.read(dry, dtype="float32")
+        w, sr = finish.finish(y, sr, a.finish, a.tone)
+        sf.write(out, w, sr, subtype="PCM_24")
+        meta.update(finish=a.finish, tone=a.tone, dry=dry)
+        print(f"finished with {a.finish}{' + room tone' if a.tone else ''} (dry: {os.path.basename(dry)})")
     json.dump(meta, open(out[:-4] + ".json", "w"), indent=1)
     print(out)
 

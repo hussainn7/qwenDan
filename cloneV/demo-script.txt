@@ -1,0 +1,13 @@
+[hook] This app does my boring work while I sleep.
+
+[story] Two months ago, I was spending three hours a day just copying things between apps.
+So I built something to do it for me.
+[hype] And honestly? It worked way better than I expected.
+
+[explain] It reads your screen, finds what you need, and does the clicking for you.
+You just tell it what you want, in plain words.
+
+[serious] But here's the part nobody talks about.
+The real cost was never the time. It was the focus.
+
+[hype] So if you want to try it, it's free, and it's open source.

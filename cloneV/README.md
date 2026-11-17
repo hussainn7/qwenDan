@@ -21,6 +21,7 @@ This is a snapshot of the work, taken 2026-11-12 and stopped mid-way.
 | Measuring the fine-tuned voice | done (section 5): no version beats the ICL clone on likeness yet |
 | Listening A/B (real / ICL / fine-tune) | reels made, waiting on my ear |
 | Wiring the fine-tuned voice into `clone.py` / qwen-voice | only if it wins the listen |
+| **Moods: a mood per line, cloned from my own sentences said that way** | **done (section 7): `voiceover.py`, `clone.py --mood`** |
 
 ## 1. The current clone (ICL)
 
@@ -214,9 +215,62 @@ Listening reels (local, not pushed: they are my voice):
 - `tools/compare.py` and `tools/likeness_x.py` for the tables
 - `tools/reel.py` for A/B reels; new lines via `finetune.py gen … --texts new_lines.json`
 
+## 7. Moods: emotion without retraining (2026-11-17)
+
+The "generic" sound came from cloning every line from one lively clip (B3: 11 st of pitch range). The model copies
+the delivery of the clip it clones from. Over 17 clips × 4 lines × 2 seeds, the clone's pitch level, range and
+movement follow the clip's at r = 0.75, pace at 0.60, loudness swing at 0.47. So `voiceover.py` gives each line a
+mood, and each mood clones from one of my real sentences said that way.
+
+**The clip bank:**
+- 234 clean sentences (28.8 min) from 55 takes, including 7 new takes and 3 reels.
+- The reels' music was removed with Demucs htdemucs_ft (`tools/separate.py`); it sat 12–28 dB under the voice.
+- Only reel sentences that still pass the quality filter are kept, since leftover music would be cloned too.
+- `tools/delivery.py` measures every sentence: pitch level, range, movement, pace, loudness swing.
+- A long-term-spectrum clustering keeps all mood clips in one recording setup.
+
+| mood | clone's read | likeness |
+|---|---|---|
+| hype | widest pitch: 13.3 st range | 84.8 |
+| hook | slowest, most emphatic: 3.7 words/s | 81.3 |
+| story | warm, lively | 92.0 |
+| explain | clear, even | **98.8** |
+| serious | low and flat: 90 Hz, 6.3 st, the low landing B3 never did | 85.4 |
+| current (B3) | 10.1 st, 105 Hz | 95.6 |
+
+- **Word errors:** none, in all 136 test takes.
+- **Likeness:** every clone sits 14–22 points under the real clip it copies, B3 included (−13.8). Excited or low
+  delivery just sounds less like my *average* voice, even when it's real (my real hype clip scores 104). So moods cost
+  nothing beyond the mood itself.
+- **Demo (9 lines):** the same average likeness as the B3-only read (84).
+  - "Serious" lines land at 89–100 Hz instead of B3's 136 Hz upswing.
+  - The hook reads at 3.3 words/s instead of 4.6.
+
+**How `voiceover.py` picks takes:**
+- Each line is its own generation, best of 4, at 1.0x.
+- Ranking: likeness − 150 × WER − 8 × distance from the mood clip's delivery (`tools/vo_rank.py`).
+
+**How it lays lines in:** with my own pauses, measured from 597 sentence ends in my takes.
+- 0.26 s after a sentence;
+- 0.4 s after ? or !;
+- 0.7 s at a paragraph break.
+
+**Finishing:** `--finish office-lav --tone` adds my office room, the lav's tone and the room tone under everything.
+
+**Outputs:** `voiceover.wav`, per-line wavs, `voiceover.json` and an `.srt`.
+
+**Next:**
+- Listen to the demo.
+- If a mood misses, try its other two candidates: `tools/mood_test.py` + `tools/mood_score.py` have them scored
+  already.
+- Adding moods (curious, sarcastic, whisper) only needs one real clip of me saying something that way.
+
 ## Files
 
-- `clone.py`, `settings.json`: the current ICL clone (see `CLONE_NOTES.md`).
+- `clone.py`, `settings.json`: the current ICL clone (see `CLONE_NOTES.md`); `--mood` picks a mood clip.
+- `voiceover.py`: a whole script with a `[mood]` per line (`demo-script.txt`), picked and laid in at 1.0x.
+- Moods: `tools/separate.py` (Demucs), `tools/delivery.py`, `tools/mood_test.py`, `tools/mood_score.py`,
+  `tools/vo_rank.py`. The mood clips and `refs/moods.json` stay local (my voice and words).
 - `tools/finetune.py`: the LoRA trainer.
   - `prep`: codec codes + x-vectors.
   - `train`: trains and saves per-pass checkpoints.

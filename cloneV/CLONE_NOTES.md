@@ -176,3 +176,101 @@ The remaining gap is prosody, not timbre: pitch peaks, low endings, and the ener
 - 3–5 minutes of clean takes in the same mic and setup, with different moods (hook, calm explainer, low landing).
 - Use them as per-mood references (like the kit's hook/body/turn/end).
 - Or fine-tune the 1.7B Base on them, with the Qwen3-TTS SFT recipe. That needs a CUDA GPU or a long MPS run.
+
+## Finishing presets: your real rooms (`finish.py`, `vo/finish/`)
+
+The clone comes out dry and thin, like a locked-down studio. A finishing preset puts a line in one of your real rooms:
+that room's echo, your mic's tone, your speaking level, and optionally your room tone underneath.
+
+```bash
+$PY ~/animations/siri-llm/vo/clone.py "text" -o line.wav --eq --finish office-lav          # line.wav finished, line.dry.wav raw
+$PY ~/animations/siri-llm/vo/clone.py "text" -o line.wav --eq --finish office-lav --tone   # + room tone under it
+$PY ~/animations/siri-llm/vo/finish.py any-clone-line.wav -o out.wav [--preset office-lav] [--tone]
+```
+
+**office-lav** (2026-11-13, fixed in the CS projects short, `~/animations/cs-projects`): your office (whiteboard,
+desk, monitor) on the clip-on lav. `vo/finish/office-lav/preset.json` records every number and how it was measured:
+- **Room:** RT60 0.3 s at 250-500 Hz, 0.5 s at 1-2 kHz, 0.4 s at 4 kHz. The tail sits 9.75 dB under the voice, after
+  early reflections at 3-19 ms. The dry clone's sound fell at 610-850 dB/s after each syllable, against 350-450 for
+  your real lines; finished, it falls at 380-500.
+- **Mic:** about +10 dB at 160-400 Hz and -10 dB at 10 kHz (4095-tap linear-phase filter). The finished clone is within
+  ±1.5 dB of your real lines from 100 Hz to 10 kHz.
+- **Level:** speech at -25.1 dBFS. The room tone is -71.6 dBFS.
+- **Use it with `--eq` on**: the preset was fitted on `--eq` takes.
+- **Proof:** running `finish.py` on the film's three raw lines reproduces the lines used in the film (correlation
+  1.000000, residual -62 dB).
+- **Words:** write them plainly as said, e.g. "resumes", not "résumés" (that read French). Check odd words by phonemes,
+  because Whisper hides mispronunciations.
+
+**Rebuild or add a room:** the fit is in `cs-projects/vo`. Run `room.py` (echo, measured from running speech per octave),
+then `match.py` (EQ after the echo), then `export_voice.py` (writes the preset here). For a new room or mic, point
+their `TAKE`/`REAL` at a take filmed there and export under a new name.
+
+### What keeps it from sounding robotic (learned 2026-11-16)
+
+The CS projects short (`~/animations/cs-projects`) is the reference: the user says that clone sounds "very nice", while
+later films with the same `--eq --finish office-lav` lines sounded robotic. Same voice; the difference is how the
+lines were laid into the film:
+- **Natural speed (1.0x).** gpu-camry ran at 1.08x and charge-left at 1.1x, through atempo.
+- **The clone's own pauses left alone.** Those films capped pauses at 0.30-0.34 s and packed lines 0.08-0.4 s apart.
+- **Room tone under everything**, so no word or gap ever drops to digital silence. Use `--tone`, or lay the take's
+  room tone the way `cs-projects/edit/build.py` does. The later films had none.
+- **No noise reduction or presence boost on the clone.** frist-hackathon ran afftdn plus +2 dB at 3.2 kHz over its
+  narration, and it was one long generated line; the clone is weakest on long run-on lines.
+- **Each sentence generated as its own line**, best of 4, with odd words checked by phonemes. Then a gentle 3:1
+  compressor and a linear loudnorm, nothing more.
+
+## Moods: your voice with emotion (`voiceover.py`, `clone.py --mood`, 2026-11-17)
+
+```bash
+PY=~/ComfyUI-Qwen3TTS-Emotional/.venv/bin/python
+$PY ~/animations/siri-llm/vo/voiceover.py script.txt -o out/vo --finish office-lav --tone   # a whole voiceover
+$PY ~/animations/siri-llm/vo/clone.py "One line." -o line.wav --mood hook                   # a single line
+```
+
+`script.txt` has one sentence per line. A `[mood]` tag holds until the next tag; a blank line is a paragraph break.
+`samples/moods/demo-script.txt` is an example.
+
+**What it does.** The old clone read everything from one clip (B3: lively, 11 semitones of pitch range), so every line
+got the same sing-song delivery whatever it said. That was the "generic" sound. The model copies the delivery of the
+clip it clones from (measured over 17 clips × 4 lines × 2 seeds: the clone's pitch level, range and movement follow
+the clip's at r = 0.75, its pace at 0.60, its loudness swing at 0.47). So each mood now clones from one of your own
+real sentences said that way:
+
+| mood | your clip it clones from (local only) | the clone's read (4 test lines) | likeness |
+|---|---|---|---|
+| hype | 0BB3650A_01 | widest: 13.3 st range | 84.8 |
+| hook | 3D6ABD96_00 | slowest, most emphatic: 3.7 w/s | 81.3 |
+| story | 267E87EC_04 | warm, lively, a bit higher | 92.0 |
+| explain | 7EC168F2_07 | clear, even; the most like you | 98.8 |
+| serious | A2308E6E_01 | low, flat (90 Hz, 6.3 st): the low landing | 85.4 |
+| current | B3 (Siri take) | 10.1 st, 105 Hz | 95.6 |
+
+Likeness: 0 = Derek, 100 = your own sentences (setup-1 centroid). Every clone lands 14–22 points under the real clip it
+copies, B3 included (−13.8); excited or low delivery just sounds less like your *average* voice even when it's really
+you (your real hype clip scores 104, your serious one 100). So the moods cost no likeness beyond the mood itself.
+All 136 test takes had 0 word errors.
+
+**Demo** (`samples/moods/`): the same 9-line script read from B3 only (`1-before-one-mood.wav`) and with moods
+(`2-after-with-moods.wav`); same average likeness (84). With B3, the "serious" line came out at
+136 Hz with 13 st of swing; with `serious` it lands at 100 Hz, and the next line at 89 Hz. The hook reads at 3.3 w/s
+instead of 4.6. `same-line-every-mood.wav` has two lines in all six moods.
+
+**How voiceover.py picks and lays in.** Each line is its own generation (4 seeds), never sped up. Whisper plus
+`tools/vo_rank.py` keep the take with the best `likeness − 150 × WER − 8 × mood distance`, where mood distance is how
+far the take's pitch level, range, movement, pace and loudness swing sit from the mood clip's, in your own spread.
+Lines are laid end to end with your own pauses, measured from 597 sentence ends in your takes: 0.26 s after a
+sentence (median), 0.4 s after ? or !, and 0.7 s at a paragraph. With `--finish office-lav` each line gets the `--eq`
+tilt, then the office/lav room, and `--tone` lays the room tone under everything. Out: `voiceover.wav`, per-line wavs,
+`voiceover.json` (times, mood, take, scores) and `voiceover.srt`.
+
+**Where the clips came from.** There are now 234 clean sentences (28.8 min) from 55 takes, including 7 takes since
+11-12 and your 3 reels (`data/reels/`, music removed with Demucs htdemucs_ft in `.venv-sep`; the music sat 12–28 dB
+under your voice). Only reel sentences that still pass the quality filter are used, because any music left in a
+clip would be cloned too. A recording-setup clustering (`data/setups.json`, 1/3-octave long-term spectrum) puts 33
+takes, the Siri take and the reels in one setup; all mood clips come from that setup, so the moods sound like one
+room and the office-lav finish fits them. Tools: `tools/separate.py`, `tools/delivery.py`,
+`tools/mood_test.py`, `tools/mood_score.py`, `tools/vo_rank.py`.
+
+**Adding or swapping a mood clip:** add an entry to `refs/moods.json` (audio in `refs/moods/`, the exact words, numbers
+as spoken), run `tools/mood_test.py --only ID`, transcribe, `tools/mood_score.py`, and set `"use": true` on the winner.
